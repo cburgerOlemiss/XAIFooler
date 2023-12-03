@@ -52,8 +52,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
     Goal Function for XAI attack.
     
     Steps: 
-        Set Maximum Prob Difference (Optional and Currently Unused)
-
         Choose similarity measure:
             RBO: Top weighted with the mass controlled by a convergent series with parameter p
 
@@ -64,6 +62,12 @@ class ADV_XAI_GF(ClassificationGoalFunction):
 
             L2: L2 norm of the base and perturbed explanations w.r.t the original document.
 
+            Jaccard Index
+            
+            Kendall
+            
+            Spearman
+
         Set parameters:
 
             For RBO, p in (0,1], the top weightedness of the explanation. Where p -> increases the top mass, p -> 1 distributes mass more equally among lower ranked features.
@@ -71,7 +75,7 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         Set Sampling Rate
         Set initial similarity threshold: similarity difference needed to accept the first perturbation
         Set successful similarity threshold: similarity difference needed to declare the attack successful, that is, stop the attack early.
-        Set adjusted query budget based on 15% of the document length
+        Set adjusted query budget based on x% of the document length
         Generate base explanation for a document
         Select feature(s) to hold constant
         Generate perturbations in batches of size defined in the attack recipe
@@ -351,19 +355,7 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         self.baseProbability = self.baseExplanation[2]
         self.basePrediction = self.baseExplanation[1]
 
-        '''
-        print("Base Explanation:")
-        print(self.baseExplanation)
-        print("Explanation df")
-        exdf = format_explanation_df(self.baseExplanation[0], self.basePrediction)
-        print(exdf)
-        print("features")
-        f =  exdf.get('feature').values
-        print(f)
-        print("weights")
-        w = exdf.get('weight').values
-        print(w)
-        '''
+
         if len(self.baseExplanationDataframe) == 0:
             return None, None
 
@@ -416,19 +408,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
             for j in range(len(attacked_text_list)):
                 ordered_weights[j] = feat2weight.get(attacked_text_list[j], 0)
 
-            '''
-            for i,(f,w) in enumerate(zip(features,weights)):
-                try:
-                    #print("Placing feature ",f, " with weight ", w, " at index ", attacked_text_list.index(f) , " (attacked_text[i]) = ", attacked_text_list[i])
-                    ordered_weights[attacked_text_list.index(f)] = w
-                except:
-                    #This should not occur as features are identically cased and taken from the document.
-                    print("Feature ", f, " not in document.")
-
-            self.baseOrderedWeights = ordered_weights
-            for i in ordered_weights:
-                self.baseTotalMass += abs(i) 
-            '''
 
             self.baseOrderedWeights = np.array(ordered_weights)
             self.baseTotalMass = np.sum(np.abs(ordered_weights))
@@ -478,31 +457,9 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         feat2weight = dict(zip(features, weights))
         for j in range(len(attacked_text_list)):
             ordered_weights[j] = feat2weight.get(attacked_text_list[j], 0)
-        '''
-        for i,(f,w) in enumerate(zip(features,weights)):
-            try:
-                #print("Placing feature ",f, " with weight ", w, " at index ", attacked_text_list.index(f) , " (attacked_text[i]) = ", attacked_text_list[i])
-                if occurences[i] == 1:
-                    ordered_weights[attacked_text_list.index(f)] = w
-                else:
-                    for j in range(len(attacked_text_list)):
-                        if attacked_text_list[j] == f:
-                            ordered_weights[j] = w
-            except:
-                #This should not occur as features are identically cased and taken from the document.
-                print("Feature ", f, " not in document.")
-        '''  
-        #print(attacked_text_list)        
-        #print(ordered_weights)
         
         total_mass = np.sum(np.abs(ordered_weights))
 
-        '''
-        total_mass = 0
-        for i in ordered_weights:
-            total_mass += abs(i)
-        #print("Total mass = ", total_mass)
-        '''   
         center_mass = total_mass / 2
         #print("Center mass = ", center_mass)
               
@@ -832,8 +789,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                        current_distance -= max_distance * self.baseOrderedExplanation['weight'][i]/self.baseAbsWeightSum
         
         
-        #print("Current distance: ",current_distance, " Total missing feature weight: ", missing_feature_weight)
-        #return (1-(current_distance / max_distance)) * (1-missing_feature_weight)
         return (current_distance / max_distance)
 
     def _is_goal_complete(self, model_output, attacked_text):
@@ -841,18 +796,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         #Empty tempScore
         self.tempScore = None
         self.tempExplanation = None
-        
-        # Max number of perturbations reached
-        # if self.numPerturbations >= self.maxPerturbations:
-        #   print("Max number of perturbations reached")
-        #   return False
-        
-        # Check that perturbed text retains all of the top n features
-        # for i in self.features[0] #top features from base explanation:
-        #   if i not in attacked_text.text:
-        #       print("FAILED! Check that perturbed text retains all of the top n features", i)
-        #       return False
-
 
         #Certain samples can occasionally return instances of only a single class throwing a value error.
         try:
@@ -870,25 +813,15 @@ class ADV_XAI_GF(ClassificationGoalFunction):
             return False
 
         targets = format_explanation_df(perturbedExplanation[0], self.basePrediction)
-        # uniques = np.unique(targets_full.get('target').values)
-        # print(uniques)
-        # if not self.multiclass and len(uniques) == 1 and uniques[0] != self.basePrediction:
+
         if len(targets) == 0:
             if self.logger:
                 print("FAILED! Explanation prediction does not cover base prediction")
             return False
 
-        # targets2 = format_explanation_df(perturbedExplanation[0])
 
-        # print("generating target with prediction", self.basePrediction, perturbedExplanation[1])
-        # print("targets2 without filtering:")
-        # print(targets2)
-        # self.tempExplanation = exDF
-        # targets = exDF.get('targets')
       
-        #Select only features within base prediction class for comparison
-        # if self.multiclass:
-        #     targets = targets[targets['target'] == self.basePrediction]
+
 
         # check that non of the replacement is within the top-n, 
         # except that the replacement is already in the text
@@ -900,11 +833,7 @@ class ADV_XAI_GF(ClassificationGoalFunction):
             to_w = attacked_text.words[new_modified_index]
             if self.logger:
                 print("modified {} -> {}".format(from_w, to_w))
-            # print("targets")
-            # print(perturbedExplanation[0].targets)
-            # print("vectorizer features", self.explainer.vec_.get_feature_names_out())
-            # print("self.base_feature_set", self.base_feature_set)
-            # print("targets.get('feature')[:self.featureSelector]", targets.get('feature')[:self.featureSelector])
+           
             modified_index = list(attacked_text.attack_attrs['modified_indices'])
             for j in modified_index:
                 to_w_j = attacked_text.words[j]
@@ -914,45 +843,24 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                     # print(targets)
                     return False
 
-        # print("newly_modified_indices not found in ", attacked_text.attack_attrs)
-            
-        # print("attacked_text", attacked_text)
 
 
         #The direct ranking is not important for the other similarity measures as they based on the feature mass. Only RBO needs to calculate the below.
         if self.RBO_flag:
             decreaseFlag = False
             for i in range(len(self.features[0])): # check in the top features
-                #Check if local explanation is missing feature
-                # if targets[targets['feature'] == self.features[0][i]].empty: 
-                #   print("FAILED! Check if local explanation is missing feature", self.features)
-                #   return False
-        
-                #Check feature rank to ensure decrease
-                #if self.features[2][i] >= targets.index[targets.feature == self.features[0][i]][0]:
-                #    print("Feature rank not smaller than original")
-                #    return False
                 
                 #At least one of the selected features was reduced in rank
-                #error here needs to debug #TODO
-                # print("top_features", self.features)
-                # print("targets", targets)
-                # print("i", i)
-                # print("=={}==".format(self.features[0][i]))
+               
                 if not (self.features[2][i] >= targets.index[targets.feature == self.features[0][i]][0]):
                     decreaseFlag = True
-                    # break
-                    
-                #if (targets.index[targets.feature == self.features[0][i]][0] > self.features[2][i] ):
-                    #print("Increased the rank of a selected feature")
-                    #return False
+                   
                     
             # No feature is has a lower rank
             if decreaseFlag == False: #
                 if self.logger:
                     print("FAILED! No feature is has a lower rank")
-                    # print(self.baseExplanationDataframe)
-                    # print(targets)
+                   
                 return False
         
 
@@ -961,54 +869,19 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         #   return False
         
         #RBO calculation 
-        # print(self.baseExplanationDataframe)
-        # print(targets)
-        # print(self.basePrediction)
-
-        # targetList = []
-        # # offset = targets[targets['target'] == self.basePrediction].index[0]
-        # for i in range(len(targets)):
-            # idx = targets.apply(lambda x: x['feature'] == self.basePrediction, axis=1)
-            # targetList.append(targets[idx].get('feature'))
-        targetList = targets.get('feature').values # assume that they are already sorted
-        # baseList = []
-        # for i in range(len(self.baseExplanationDataframe)):
-            # idx = self.baseExplanationDataframe.apply(lambda x: x['feature'] == self.basePrediction, axis=1)
-            # baseList.append(self.baseExplanationDataframe[idx].get('feature'))
+      
         baseList = self.baseExplanationDataframe.get('feature').values # assume that they are already sorted
 
-        # print(targetList)
-        # print(baseList)
+       
 
         if self.RBO_flag:
             #print("calculating RBO using p=", self.p_RBO)
             rboOutput = self.RBO(targetList,baseList, p=self.p_RBO)
-            # print("targetList", targetList)
-            # print("baseList", baseList)
+            
             if self.logger:
                 print("Internal rboOutput", rboOutput)
             self.tempScore = rboOutput
             
-            # #No current best candidate found, set as current best if similarity is different enough
-            # #Used to prevent small differences in RBO value being flagged as a viable candidate to keep the perturbation
-            # if self.bestScore == None:
-            #   if  rboOutput < self.initial_acceptance_threshold:
-            #       self.tempScore = rboOutput
-            #   else:
-            #       return False
-
-            # #Previous best candidate already exists, accept peturbation if below current best
-            # #This is very greedy and accepts any outcome that is less similar, not ideal for minimzing number of perturbations
-            # #but current perturbed document percentage is low even being this greedy, so not of much concern.
-            # else:
-            #   if rboOutput < self.bestScore:
-            #       self.tempScore = rboOutput
-            #   else:
-            #       return False
-                    
-            # self.bestScore = rboOutput
-            
-            # self.numPerturbations += 1
             
             #Explanation still too similar, accept perturbation and continue search
             if self.tempScore > self.success_threshold:  
@@ -1026,12 +899,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                 print("Internal comOutput", comOutput)
 
             self.tempScore = comOutput
-            # if self.bestScore is None:
-            #     self.bestScore = self.tempScore
-            # elif abs(self.tempScore-self.baseCOM) > abs(self.bestScore-self.baseCOM):      
-            #     self.bestScore = comOutput
-            
-            # self.numPerturbations += 1
             
             #Explanation still too similar, accept perturbation and continue search
             if self._get_score(model_output,_) < self.success_threshold:  
@@ -1049,12 +916,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                 print("Internal comOutput", comOutput)
 
             self.tempScore = comOutput
-            # if self.bestScore is None:
-            #     self.bestScore = self.tempScore
-            # elif abs(self.tempScore-self.baseCOM) > abs(self.bestScore-self.baseCOM):      
-            #     self.bestScore = comOutput
-            
-            # self.numPerturbations += 1
             
             #Explanation still too similar, accept perturbation and continue search
             if abs(self.tempScore-self.baseCOM) < self.success_threshold:  
@@ -1072,12 +933,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                 print("Internal comOutput", comOutput)
 
             self.tempScore = comOutput
-            # if self.bestScore is None:
-            #     self.bestScore = self.tempScore
-            # elif abs(self.tempScore-self.baseCOM) > abs(self.bestScore-self.baseCOM):      
-            #     self.bestScore = comOutput
-            
-            # self.numPerturbations += 1
             
             #Explanation still too similar, accept perturbation and continue search
             if self._get_score(model_output, None) < self.success_threshold:  
@@ -1095,12 +950,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                 print("Internal l2", l2)
 
             self.tempScore = l2
-            # if self.bestScore is None:
-            #     self.bestScore = self.tempScore
-            # elif abs(self.tempScore-self.bestScore) > abs(self.bestScore-self.baseCOM):      
-            #     self.bestScore = l2
-            
-            # self.numPerturbations += 1
             
             #Explanation still too similar, accept perturbation and continue search
             if l2 / self.baseTotalMass < self.success_threshold:  
@@ -1274,16 +1123,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
         """
         results = []
         
-        # if self.query_budget < float("inf"):
-            
-        #   #End search early if no initial perturbation found with x attempts or max perturbations reached
-        #   if (self.numPerturbations == 0 and self.num_queries > 75) or (self.maxPerturbations <= self.numPerturbations):
-        #       queries_left = 11
-        #       attacked_text_list = attacked_text_list[:queries_left]
-        #   else:
-        #       queries_left = self.query_budget - self.num_queries
-        #       attacked_text_list = attacked_text_list[:queries_left]
-
         self.num_queries += len(attacked_text_list)
         model_outputs = self._call_model(attacked_text_list)
 
@@ -1422,29 +1261,6 @@ class ADV_XAI_GF(ClassificationGoalFunction):
             else:
                 return 0
        
-    # def get_explanations(self, originalText, attackedText):
-    #     """Returns selected features, base and perturbed explanations after attack completion
-    #        Requires the original text and the perturbed text.
-    #     """
-    #     baseExplanation =  self.generateBaseExplanation(originalText)
-        
-    #     if originalText == attackedText:
-    #         perturbedExplanation = baseExplanation
-    #     else:
-    #         perturbedExplanation = self.generateExplanation(attackedText)
-    #     perturbedExplanation = self.generateExplanation(attackedText)
-        
-    #     self.baseExplanation = baseExplanation
-        
-    #     features = self.selectTopFeatures(top_n=self.featureSelector)
-        
-    #     bTargets = format_explanation_df(baseExplanation[0])
-    #     # bTargets = bDF.get('targets')
-        
-    #     pTargets = format_explanation_df(perturbedExplanation[0])
-    #     # pTargets = pDF.get('targets')
-        
-    #     return(features,bTargets,pTargets)
     
     def _call_model_LIME_Sampler(self, attacked_text_list):
         """Gets predictions for a list of ``AttackedText`` objects.
@@ -1478,20 +1294,7 @@ class ADV_XAI_GF(ClassificationGoalFunction):
                         uncached_list.append(text)
                         local_cache.add(text.text)
 
-                # else:
-                #   # print("not available yet [{}]".format(text.text))
-                #   # print(text in self._call_model_cache)
-                #   # print(self._call_model_cache)
-                #   uncached_list.append(text)
 
-
-            # uncached_list = [
-            #   text
-            #   for text in attacked_text_list
-            #   if text not in self._call_model_cache
-            # ]
-
-            # print("-->calling models on ___ texts", len(uncached_list))
             outputs = self._call_model_uncached(uncached_list)
             for text, output in zip(uncached_list, outputs):
                 self._call_model_cache[text] = output
