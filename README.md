@@ -1,8 +1,5 @@
 
 
-Work in progress (12/2/23): Currently cleaning up the code for public release.
-
-
 # XAIFooler
 
 This is the introduction and repository for **XAIFooler** the algorithm behind "Are Your Explanations Reliable?" Investigating the Stability of LIME in Explaining Text Classifiers by Marrying XAI and Adversarial Attack" (EMNLP 2023).
