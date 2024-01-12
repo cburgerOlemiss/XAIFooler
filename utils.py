@@ -1,3 +1,4 @@
+from search_GA import GA
 import textattack
 from textattack.goal_functions.classification.classification_goal_function import ClassificationGoalFunction
 from textattack.goal_functions import GoalFunction
@@ -42,12 +43,13 @@ from sklearn.tree import DecisionTreeClassifier
 
 from search import GreedyWordSwapWIR_XAI
 from search_random import GreedyWordSwapWIR_RANDOM
+from search_GA import GA
 from goals import ADV_XAI_GF
 from initialgoal import initialIndexGF
 from sklearn.feature_extraction.text import CountVectorizer
 
 
-class ADV_XAI_RBO(AttackRecipe):
+class ADV_XAI_Attack(AttackRecipe):
 	"""
 		Attack Recipe for the adversarial explanation attack.
 
@@ -95,8 +97,11 @@ class ADV_XAI_RBO(AttackRecipe):
 			  logger=None,
 			  rbo_p=0.8,
 			  similarity_measure = 'rbo',
-			  greedy_search=None #placeholder
-			 ):
+			  greedy_search=None, #placeholder,
+			  search_method = 'xaifooler',
+			  crossover = 'uniform',
+			  parent_selection = 'roulette'
+	):
 		#
 		# Swap words with their 10 closest embedding nearest-neighbors.
 		# Embedding: Counter-fitted PARAGRAM-SL999 vectors.
@@ -169,19 +174,32 @@ class ADV_XAI_RBO(AttackRecipe):
 											featureSelector = featureSelector,
 											limeSamples = limeSamples,
 											random_seed = random_seed,
-										    model_batch_size=model_batch_size
+											model_batch_size=model_batch_size
 											)
 		
-		search_method = GreedyWordSwapWIR_XAI(wir_method="delete", 
-											initialIndexGF=indexGoalFunction,
-											reverseIndices=reverse_search_indices)
+		
+		t1 = search_method = GreedyWordSwapWIR_XAI(wir_method="delete", 
+												initialIndexGF=indexGoalFunction,
+												reverseIndices=reverse_search_indices)
+		t2 = search_method = GA(crossover_type = crossover, parent_selection = parent_selection)
+		
+		#print(type(t1),type(t2))
+		
+		if search_method == 'xaifooler':
+
+			search_method = GreedyWordSwapWIR_XAI(wir_method="delete", 
+												initialIndexGF=indexGoalFunction,
+												reverseIndices=reverse_search_indices)
+		elif search_method == 'GA':
+
+			search_method = GA(crossover_type = crossover, parent_selection = parent_selection)
 
 		return Attack(goal_function, constraints, transformation, search_method)
 	
 
 
 
-class RANDOM_BASELINE(AttackRecipe):
+class RANDOM_BASELINE_Attack(AttackRecipe):
 	@staticmethod
 	def build(model_wrapper,
 			  categories,
@@ -199,7 +217,10 @@ class RANDOM_BASELINE(AttackRecipe):
 			  logger = None,
 			  similarity_measure = 'rbo',
 			  rbo_p=0.8,
-			  greedy_search=False
+			  greedy_search=False,
+			  search_method = 'xaifooler',
+			  crossover = 'uniform',
+			  parent_selection = 'roulette'
 			 ):
 		#
 		# Swap words with their 10 closest embedding nearest-neighbors.
@@ -272,12 +293,11 @@ class RANDOM_BASELINE(AttackRecipe):
 											featureSelector = featureSelector,
 											limeSamples = limeSamples,
 											random_seed = random_seed,
-										    model_batch_size=model_batch_size
+											model_batch_size=model_batch_size
 											)
-		
 		search_method = GreedyWordSwapWIR_RANDOM(wir_method="random", 
-											initialIndexGF=indexGoalFunction,
-											reverseIndices=False,
-											greedy_search=greedy_search)
+												initialIndexGF=indexGoalFunction,
+												reverseIndices=False,
+												greedy_search=greedy_search)
 
 		return Attack(goal_function, constraints, transformation, search_method)

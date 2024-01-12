@@ -99,7 +99,7 @@ print("---main---")
 # print(prediction)
 
 
-attack = ADV_XAI_RBO.build(model_wrapper,
+attack = ADV_XAI_Attack.build(model_wrapper,
                            categories = categories,
                            featureSelector = 3, 
                            limeSamples = 5000,
