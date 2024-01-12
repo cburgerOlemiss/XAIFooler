@@ -26,7 +26,9 @@ parser.add_argument('--batch-size', type=int, default=256)
 parser.add_argument('--max-length', type=int, default=250)
 parser.add_argument('--epochs', type=int, default=3)
 parser.add_argument('--seed-dataset', type=int, default=12)
-args = parser.parse_args()
+
+args, unknown = parser.parse_known_args()
+#args = parser.parse_args()
 
 MODEL_NAME = args.model
 DATASET_NAME = args.dataset

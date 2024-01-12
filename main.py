@@ -16,7 +16,7 @@ scipy.stats.itemfreq=monkeypath_itemfreq
 import textattack
 import transformers
 
-from utils import RANDOM_BASELINE, ADV_XAI_RBO
+from utils import RANDOM_BASELINE_Attack, ADV_XAI_Attack
 from timeit import default_timer as timer
 
 import gc
@@ -24,9 +24,12 @@ gc.collect()
 torch.cuda.empty_cache()
 
 import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'max_split_size_mb:128'
 
-from optimum.onnxruntime import ORTModelForSequenceClassification
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = 'max_split_size_mb:24'
+os.environ["TF_GPU_ALLOCATOR"] = 'cuda_malloc_async'
+
+
+
 from common import *
 import pickle
 from tqdm import tqdm
@@ -53,7 +56,7 @@ def load(filename):
 if __name__ == "__main__":
 	args = load_args()
 	filename = generate_filename(args)
-	
+
 	print("+++++++++++++++++++++++++++++++++++")
 	print(filename)
 	print(args)
@@ -68,23 +71,31 @@ if __name__ == "__main__":
 		json.dump(args.__dict__, f, indent=2)
 
 	models = ['distilbert-base-uncased-imdb-saved',
-		 'bert-base-uncased-imdb-saved',
-		 'roberta-base-imdb-saved',
-		 'distilbert-base-uncased-md_gender_bias-saved',
-		 'bert-base-uncased-md_gender_bias-saved',
-		 'roberta-base-md_gender_bias-saved',
-		 'bert-base-uncased-s2d-saved',
-		 'distilbert-base-uncased-s2d-saved',
-		 'roberta-base-s2d-saved']
+		'bert-base-uncased-imdb-saved',
+		'roberta-base-imdb-saved',
+		'distilbert-base-uncased-md_gender_bias-saved',
+		'bert-base-uncased-md_gender_bias-saved',
+		'roberta-base-md_gender_bias-saved',
+		'bert-base-uncased-s2d-saved',
+		'distilbert-base-uncased-s2d-saved',
+		'roberta-base-s2d-saved']
 
 	if args.model.replace('thaile/','') not in models:
 		print("CAUTION! You are running a model not in the model cards.")
 
-	model = ORTModelForSequenceClassification.from_pretrained(args.model, 
-															export=True, 
-															provider="CUDAExecutionProvider", 
-															use_io_binding=True)
-	tokenizer = transformers.AutoTokenizer.from_pretrained(args.model, use_fast=True)
+	try:
+		from optimum.onnxruntime import ORTModelForSequenceClassification
+		model = ORTModelForSequenceClassification.from_pretrained(args.model, 
+																export=True, 
+																provider="CUDAExecutionProvider", 
+																use_io_binding=True)
+		tokenizer = transformers.AutoTokenizer.from_pretrained(args.model, use_fast=True)
+	except:
+		print("Error using Optimum Runtime, using default model settings")
+		model = transformers.AutoModelForSequenceClassification.from_pretrained(args.model) 
+		tokenizer = transformers.AutoTokenizer.from_pretrained(args.model)
+
+
 	if args.max_length:
 		tokenizer.model_max_length = args.max_length
 
@@ -108,16 +119,15 @@ if __name__ == "__main__":
 	data = []
 	for i in range(len(dataset)):
 		text = dataset[i].get(args.text_col)
-		example = textattack.shared.attacked_text.AttackedText(text, stopwords=stopwords)
-
-		if args.min_length and example.num_words_non_stopwords < args.min_length:
+		example = textattack.shared.attacked_text.AttackedText(text)
+		num_words_non_stopwords = len([w for w in example._words if w not in stopwords])
+		if args.min_length and num_words_non_stopwords < args.min_length:
 			continue
 		if args.max_length and example.num_words > args.max_length:
 			continue
 		label = dataset[i].get(args.label_col)
 		data.append((example, label))
 
-	# print("data", data[:5])
 	categories = list(np.unique([tmp[1] for tmp in data]))
 	print("CATEGORIES", categories)
 
@@ -125,17 +135,27 @@ if __name__ == "__main__":
 		rng = np.random.default_rng(seed=args.seed_dataset)
 		rng.shuffle(data)
 		data = data[:args.num]
-		# for i in data:
-		#     print(i)
 
 	pbar = tqdm(range(0, len(data)), bar_format='{desc:<20}{percentage:3.0f}%|{bar:10}{r_bar}')
-	# pbar = range(len(dataset))
+
 
 	def generate_attacker(ATTACK_CLASS, args, custom_seed=None, greedy_search=True):
+		
+		if args.lime_sr is not None:
+			samples = args.lime_sr
+		elif args.dataset == 'imdb':
+			samples = 4500
+		elif args.dataset =='gb':
+			samples = 1500
+		elif args.dataset == 's2d':
+			samples = 2500
+		else:
+			samples = 5000
+			
 		attack = ATTACK_CLASS.build(model_wrapper,
 									categories = categories,
 									featureSelector = args.top_n, 
-									limeSamples = args.lime_sr,
+									limeSamples = samples,
 									random_seed = args.seed if not custom_seed else custom_seed,
 									success_threshold=args.success_threshold,
 									model_batch_size=args.batch_size,
@@ -144,7 +164,10 @@ if __name__ == "__main__":
 									modification_rate=args.modify_rate,
 									rbo_p = args.rbo_p,
 									similarity_measure=args.similarity_measure,
-									greedy_search=greedy_search
+									greedy_search=greedy_search,
+									search_method = args.method,
+									crossover = args.crossover,
+									parent_selection = args.parent_selection
 									)
 
 		attack_args = textattack.AttackArgs(num_examples=1,
@@ -159,18 +182,22 @@ if __name__ == "__main__":
 
 		return attacker
 
+
 	if args.method == "xaifooler":
-		attacker = generate_attacker(ADV_XAI_RBO, args, custom_seed=None)
+		attacker = generate_attacker(ADV_XAI_Attack, args, custom_seed=None)
 
 	elif args.method == "inherent":
-		attacker1 = generate_attacker(ADV_XAI_RBO, args, custom_seed=np.random.choice(1000))
-		attacker2 = generate_attacker(ADV_XAI_RBO, args, custom_seed=np.random.choice(1000))
+		attacker1 = generate_attacker(ADV_XAI_Attack, args, custom_seed=np.random.choice(1000))
+		attacker2 = generate_attacker(ADV_XAI_Attack, args, custom_seed=np.random.choice(1000))
 
 	elif args.method == "random":
-		attacker = generate_attacker(RANDOM_BASELINE, args, custom_seed=None, greedy_search=True)
+		attacker = generate_attacker(RANDOM_BASELINE_Attack, args, custom_seed=None, greedy_search=True)
 
 	elif args.method == "truerandom":
-		attacker = generate_attacker(RANDOM_BASELINE, args, custom_seed=None, greedy_search=False)
+		attacker = generate_attacker(RANDOM_BASELINE_Attack, args, custom_seed=None, greedy_search=False)
+
+	elif args.method == 'ga':
+		attacker = generate_attacker(ADV_XAI_Attack, args, custom_seed=None)
 
 	results = []
 
@@ -183,14 +210,19 @@ if __name__ == "__main__":
 			results = previous_results
 
 	rbos = []
+	sims = []
 	for i in pbar:
+			gc.collect()
+			torch.cuda.empty_cache()
 		# try:
 			example, label = data[i]
 			print("****TEXT*****")
 			print("Text", example.text)
 			print("Label", label)
-			print("# words (ignore stopwords)", example.num_words_non_stopwords)
-
+			#print("# words (ignore stopwords)", example.num_words_non_stopwords)
+			num_words_non_stopwords = len([w for w in example._words if w not in stopwords])
+			print("# words (ignore stopwords)", num_words_non_stopwords)
+			
 			if not args.rerun and previous_results and example.text in previous_texts:
 				print("ALREADY DONE, IGNORE...")
 				continue
@@ -198,9 +230,23 @@ if __name__ == "__main__":
 			# if args.max_length:
 			#     text = " ".join(text.split()[:args.max_length])
 
-			if args.method in set(["xaifooler", "random", "truerandom"]):
+			if args.method in set(["xaifooler", "random", "truerandom",'ga']):
 				output = attacker.attack.goal_function.get_output(example)
-				result = attacker.attack.attack(example, output)
+				result = None
+				
+				#certain malformed instances can return empty dataframes
+				
+				#result = attacker.attack.attack(example, output)
+
+				try:
+					result = attacker.attack.attack(example, output)
+				except:
+					print("Error generating result")
+					results.append({'example': example, 'result': None, 'exp_before': None, 'exp_after': None, 'rbo': None, 'log': 'prediction mismatched'})
+					if not args.debug:
+						save(results, filename)
+					continue
+					
 				if result:
 					print(result.__str__(color_method="ansi") + "\n")
 
@@ -225,7 +271,7 @@ if __name__ == "__main__":
 
 				exp1 = attacker1.attack.goal_function.generateExplanation(sent1)
 				exp2 = attacker2.attack.goal_function.generateExplanation(sent2)
-			
+
 			print("Base prediction", exp1[1])
 			print("Attacked prediction", exp2[1])
 			print("sent1", sent1)
@@ -242,6 +288,10 @@ if __name__ == "__main__":
 			rboOutput = RBO(targetList, baseList, p=args.rbo_p)
 			print("rboOutput", rboOutput)
 			rbos.append(rboOutput)
+			
+			simOutput = generate_comparative_similarities(result.perturbed_result.attacked_text.text,exp1,exp2)
+			print("Comparative Sims", simOutput)
+			sims.append(simOutput)
 			# pbar.set_description(f"#{i} | Text: {text[:20]}... | RBO Score: {round(rboOutput,2)}")
 			pbar.set_description('||Average RBO={}||'.format(np.mean(rbos)))
 
@@ -250,7 +300,7 @@ if __name__ == "__main__":
 			adjusted_length = 0
 			s1 = result.original_result.attacked_text.text.split() 
 			s2 = result.perturbed_result.attacked_text.text.split()
-        
+
 			for i in range(len(s1)):
 				#print("Comparing: ", s1[i] , s2[i])
 				if s1[i][0].isalpha():  
@@ -262,17 +312,11 @@ if __name__ == "__main__":
 			#print(pwp,len(s1),adjusted_length)
 			pwp = pwp / (len(s1)-adjusted_length)
 			print("Perturbed Word Proportion: ",pwp)
-			
-			results.append({'example': example, 'result': result, 'exp_before': exp1, 'exp_after': exp2, 'rbo': rboOutput, 'log': None,'perturbed_word_proportion': pwp})
+
+			results.append({'example': example, 'result': result, 'exp_before': exp1, 'exp_after': exp2, 'rbo': rboOutput,'comparativeSims': simOutput, 'log': None,'perturbed_word_proportion': pwp})
 
 
 			if not args.debug:
 				save(results, filename)
-
-		# except Exception as e:
-		# 	print(e)
-		# 	if not args.debug:
-		# 		results.append({'example': example, 'result': None, 'exp_before': None, 'exp_after': None, 'rbo': None, 'log': e})
-		# 		save(results, filename)
-
+				
 
